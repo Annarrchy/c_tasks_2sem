@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <iterator>
 
 template <typename type>
@@ -26,9 +26,9 @@ public:
 		try {
 			uint64_t s = 0, f = 0;
 			fin = new block(*old.fin);
-			uint64_t finish = fin->amount;
+			uint64_t finish = fin->block_number;
 			init = new block(*old.init);
-			uint64_t start = init->amount, i = start;
+			uint64_t start = init->block_number, i = start;
 			while (i <= finish) {
 				arr[i] = reinterpret_cast<type*>(new uint64_t[block_capacity * sizeof(type)]);
 				if (i == start) {
@@ -125,36 +125,36 @@ public:
 	};
 
 	Iterat<false> begin() {
-		return Iterat<false>(arr + init->amount, init->curr);
+		return Iterat<false>(arr + init->block_number, init->curr);
 	}
 
 	Iterat<true> begin() const {
-		return Iterat<true>(arr + init->amount, init->curr);
+		return Iterat<true>(arr + init->block_number, init->curr);
 	}
 
 	Iterat<true> cbegin() const {
-		return Iterat<true>(arr + init->amount, init->curr);
+		return Iterat<true>(arr + init->block_number, init->curr);
 	}
 
 	Iterat<false> end() {
 		if (fin->last != fin->curr) {
-			return Iterat<false>(arr + fin->amount, fin->curr + 1);
+			return Iterat<false>(arr + fin->block_number, fin->curr + 1);
 		}
-		return Iterat<false>(arr + fin->amount + 1, fin->first);
+		return Iterat<false>(arr + fin->block_number + 1, fin->first);
 	}
 
 	Iterat<true> end() const {
 		if (fin->last != fin->curr) {
-			return Iterat<true>(arr + fin->amount, fin->curr + 1);
+			return Iterat<true>(arr + fin->block_number, fin->curr + 1);
 		}
-		return Iterat<true>(arr + fin->amount + 1, fin->first);
+		return Iterat<true>(arr + fin->block_number + 1, fin->first);
 	}
 
 	Iterat<true> cend() const {
 		if (fin->last != fin->curr) {
-			return Iterat<true>(arr + fin->amount, fin->curr + 1);
+			return Iterat<true>(arr + fin->block_number, fin->curr + 1);
 		}
-		return Iterat<true>(arr + fin->amount + 1, fin->first);
+		return Iterat<true>(arr + fin->block_number + 1, fin->first);
 	}
 
 	std::reverse_iterator<Iterat<false>> rbegin() {
@@ -196,9 +196,9 @@ public:
 	std::pair<uint64_t, uint64_t> get_pos(uint64_t ind) const {
 		if (init->curr + ind >= block_capacity) {
 			ind -= (block_capacity - init->curr);
-			return { init->amount + 1 + ind / block_capacity, ind % block_capacity };
+			return { init->block_number + 1 + ind / block_capacity, ind % block_capacity };
 		}
-		return { init->amount, init->curr + ind };
+		return { init->block_number, init->curr + ind };
 	};
 	type& operator[](uint64_t ind) {
 		std::pair<uint64_t, uint64_t> pos = get_pos(ind);
@@ -240,13 +240,14 @@ public:
 			for (size_t i = 0; i < capacity; ++i) {
 				new_arr[start_cap + i] = arr[i];
 			}
-			init->amount += start_cap;
-			fin->amount += start_cap;
+			init->block_number += start_cap;
+			fin->block_number += start_cap;
 			delete arr;
 			capacity = start_cap + capacity + finish_cap;
 			arr = new_arr;
 		}
 		catch (...) {
+		        delete[] new_arr;
 			throw;
 		}
 	}
@@ -256,25 +257,25 @@ public:
 				fin->curr += 1;
 			}
 			else {
-				if (fin->amount == capacity - 1) {
+				if (fin->block_number == capacity - 1) {
 					reserve(0,true);
 				}
 				fin->curr = 0;
-				fin->amount += 1;
+				fin->block_number += 1;
 			}
 		}
-		arr[fin->amount][fin->curr] = type(value);
+		arr[fin->block_number][fin->curr] = type(value);
 		siz += 1;
 	}
 	void pop_back() {
 		if (siz == 0) return;
-		(arr[fin->amount] + fin->curr)->~type();
+		(arr[fin->block_number] + fin->curr)->~type();
 		if (siz != 1) {
 			if (fin->curr != fin->first) {
 				fin->curr -= 1;
 			}
 			else {
-				fin->amount -= 1;
+				fin->block_number -= 1;
 				fin->curr = fin->last;
 			}
 		}
@@ -287,14 +288,14 @@ public:
 				init->curr -= 1;
 			}
 			else {
-				if (init->amount == 0) {
+				if (init->block_number == 0) {
 					reserve(true, 0);
 				}
-				init->amount -= 1;
+				init->block_number -= 1;
 				init->curr = block_capacity - 1;
 			}
 		}
-		arr[init->amount][init->curr] = type(value);
+		arr[init->block_number][init->curr] = type(value);
 		siz += 1;
 	}
 	void erase(Iterat<false> it) {
@@ -314,13 +315,13 @@ public:
 	void pop_front() {
 		if (siz == 0) return;
 
-		(arr[init->amount] + init->curr)->~type();
+		(arr[init->block_number] + init->curr)->~type();
 		if (siz != 1) {
 			if (init->curr != init->first) {
 				init->curr += 1;
 			}
 			else {
-				init->amount += 1;
+				init->block_number += 1;
 				init->curr = init->last;
 			}
 		}
@@ -354,14 +355,14 @@ private:
 	size_t capacity;
 	const static int block_capacity = 32;
 	struct block {
-		uint64_t amount;
+		uint64_t block_number;
 		uint64_t curr;
 		uint64_t first;
 		uint64_t last;
 		static void swap(block& first, block& second) {
 			std::swap(first.last, second.last);
 			std::swap(first.curr, second.curr);
-			std::swap(first.amount, second.amount);
+			std::swap(first.block_number, second.block_number);
 			std::swap(first.first, second.first);
 		}
 		static block* init(uint64_t n, uint64_t c) {
@@ -370,8 +371,8 @@ private:
 		static block* fin(uint64_t n, uint64_t c) {
 			return new block(n, c, 0, block_capacity - 1);
 		}
-		block(uint64_t n, uint64_t c, uint64_t f, uint64_t l) : amount(n), curr(c), first(f), last(l) {}
-		block(const block& old) : amount(old.amount), curr(old.curr), first(old.first), last(old.last) {};
+		block(uint64_t n, uint64_t c, uint64_t f, uint64_t l) : block_number(n), curr(c), first(f), last(l) {}
+		block(const block& old) : block_number(old.block_number), curr(old.curr), first(old.first), last(old.last) {};
 
 
 	};
