@@ -1,4 +1,4 @@
-﻿#include<iostream>
+#include<iostream>
 #include<vector>
 
 template<int64_t Size>
@@ -12,7 +12,10 @@ public:
 
 	char* allocate(int64_t n, const int64_t align) {
 		char* copy = finish;
-		finish += n + align - ((reinterpret_cast<uintptr_t>(finish) + n) % align);
+		finish += n;
+		void* ptr = static_cast<void *>(finish);
+		size_t space = sizeof(start) - 1;
+		finish = static_cast<char*>(std::align(align, sizeof(char), ptr, space));
 		return copy;
 	}
 
@@ -73,23 +76,28 @@ private:
 template<typename T, typename Allocator = std::allocator<T>>
 class List {
 private:
-	class Node {
+	class BaseNode {
 	public:
-		T value;
-		Node* prev = this;
-		Node* next = this;
-		Node(Node* prev = nullptr, Node* next = nullptr) : value(T()), prev(prev), next(next) {}
-		Node() = default;
-		Node(const T& newValue) : value(newValue), prev(this), next(this) {}
-		~Node() {}
-		explicit Node(const T& value, Node* prev, Node* next) : value(value), prev(prev), next(next) {};
+		BaseNode* prev;
+		BaseNode* next;
+		BaseNode() : prev(this), next(this) {}
+		BaseNode(BaseNode* p, BaseNode* n) : prev(p), next(n) {}
 	};
 
-	Node* root;
+	class Node :public  BaseNode {
+	public:
+		Node() = default;
+		T value;
+		Node(const T& value, BaseNode* prev, BaseNode* next)
+			: BaseNode(prev, next), value(value) {}
+		Node(BaseNode* prev, BaseNode* next): BaseNode(prev, next), value(T()) {}
+	};
+
+	BaseNode* root;
 	size_t sz = 0;
 	using NAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<Node>;
 	NAllocator alloc;
-	void bind_nodes(Node* left, Node* right) {
+	void bind_nodes(BaseNode* left, BaseNode* right) {
 		if (left != nullptr) left->next = right;
 		if (right != nullptr) right->prev = left;
 	}
@@ -102,9 +110,11 @@ private:
 		using pointer = std::conditional_t<Con, const T*, T*>;
 		using reference = std::conditional_t<Con, const T&, T&>;
 		friend class List<T, Allocator>;
-		iter() : ptr(nullptr) {};
-		iter(Node* v) : ptr(v) {}
+		
+		iter() = default;
+		iter(BaseNode* node) : ptr(node) {};
 		iter(const iter<false>& other) : ptr(other.ptr) {};
+
 		iter& operator++() {
 			ptr = ptr->next;
 			return *this;
@@ -115,7 +125,7 @@ private:
 			++* this;
 			return ans;
 		}
-		Node* getNodePtr() const { return ptr; }
+		BaseNode* getNodePtr() const { return ptr; }
 
 
 		iter& operator--() {
@@ -132,12 +142,11 @@ private:
 			return ans;
 		}
 
-		reference operator*() const {
-			return ptr->value;
+		std::conditional_t<Con, const T&, T&> operator*() const {
+			return reinterpret_cast<Node*>(ptr)->value;
 		}
-
-		pointer operator->() const {
-			return &ptr->value;
+		std::conditional_t<Con, const T*, T*> operator->() const {
+			return &(reinterpret_cast<Node*>(ptr)->value);
 		}
 
 		operator iter<true>() {
@@ -148,15 +157,30 @@ private:
 			return !(*this == other);
 		}
 	private:
-		Node* ptr;
+		BaseNode* ptr;
 	};
-	Node* build_node() {
-		Node* new_head = static_cast<Node*>(std::allocator_traits<NAllocator>::allocate(alloc, 1));
+	BaseNode* build_base_node() {
+		BaseNode* new_head = static_cast<BaseNode*>(std::allocator_traits<NAllocator>::allocate(alloc, 1));
 		if (new_head != nullptr) {
 			new_head->next = new_head;
 			new_head->prev = new_head;
 		}
 		return new_head;
+	}
+	void insert_before_with_value(iter<true> pos, const T& val) {
+		--pos;
+		BaseNode* prev = (pos).ptr;
+		Node* new_node = std::allocator_traits<NAllocator>::allocate(alloc, 1);
+		try {
+			++pos;
+			std::allocator_traits<NAllocator>::construct(alloc, new_node, val, prev, (pos).ptr);
+			bind_n2(new_node, pos.ptr, prev);
+		}
+		catch (...) {
+			std::allocator_traits<NAllocator>::deallocate(alloc, new_node, 1);
+			throw;
+		}
+		sz += 1;
 	}
 
 public:
@@ -203,29 +227,15 @@ public:
 	const_reverse_iterator crend() const {
 		return const_reverse_iterator(root->next);
 	}
-	void bind_n2(Node* n1, Node* n2, Node* n3) {
+	void bind_n2(BaseNode* n1, BaseNode* n2, BaseNode* n3) {
 		bind_nodes(n1, n2);
 		bind_nodes(n3, n1);
 	}
-	void insert_before(const_iterator pos) {
-		--pos;
-		Node* prev = (pos).ptr;
-		Node* new_node = std::allocator_traits<NAllocator>::allocate(alloc, 1);
-		try {
-			++pos;
-			std::allocator_traits<NAllocator>::construct(alloc, new_node, prev, (pos).ptr);
-			bind_n2(new_node, pos.ptr, prev);
-		}
-		catch (...) {
-			std::allocator_traits<NAllocator>::deallocate(alloc, new_node, 1);
-			throw;
-		}
-		sz += 1;
-	}
 
 	explicit List(const Allocator& alloc = Allocator()) : alloc(alloc) {
-		root = build_node();
+		root = build_base_node();
 	}
+	
 
 	bool empty() const { return sz == 0; }
 	void Catch() {
@@ -235,22 +245,6 @@ public:
 		throw;
 	}
 
-
-	void insert_before_with_value(const_iterator pos, const T& val) {
-		--pos;
-		Node* prev = (pos).ptr;
-		Node* new_node = std::allocator_traits<NAllocator>::allocate(alloc, 1);
-		try {
-			++pos;
-			std::allocator_traits<NAllocator>::construct(alloc, new_node, val, prev, (pos).ptr);
-			bind_n2(new_node, pos.ptr, prev);
-		}
-		catch (...) {
-			std::allocator_traits<NAllocator>::deallocate(alloc, new_node, 1);
-			throw;
-		}
-		sz += 1;
-	}
 	List(size_t newSz, const T& newValue, const Allocator& alloc = Allocator()) : List(alloc) {
 		try {
 			while (newSz != 0) {
@@ -263,17 +257,7 @@ public:
 		}
 
 	}
-	List(size_t newSz, const Allocator& alloc = Allocator()) : List(alloc) {
-		try {
-			while (newSz != 0) {
-				insert_before(end());
-				newSz -= 1;
-			}
-		}
-		catch (...) {
-			Catch();
-		}
-	}
+	List(size_t newSz, const Allocator& alloc = Allocator()) : List(newSz, T(), alloc) {}
 
 	List(const List& other) :
 		List(std::allocator_traits<Allocator>::select_on_container_copy_construction(other.alloc)) {
@@ -292,7 +276,7 @@ public:
 		while (!empty()) {
 			pop_front();
 		}
-		std::allocator_traits<NAllocator>::deallocate(alloc, root, 1);
+		std::allocator_traits<NAllocator>::deallocate(alloc, static_cast<Node*>(root), 1);
 	}
 
 	List& operator=(const List& other) {
@@ -333,24 +317,17 @@ public:
 		return sz;
 	}
 
-	void erase_between(Node* prv, Node* nxt) {
+	void push_back(const T& value) noexcept { insert_before_with_value(end(), value); }
+	void push_front(const T& value) noexcept { insert_before_with_value(begin(), value); }
+	void erase(const_iterator id) noexcept {
+		id.ptr->next->prev = id.ptr->prev;
+		id.ptr->prev->next = id.ptr->next;
 		--sz;
-		Node* v = prv->next;
-		prv->next = nxt;
-		nxt->prev = prv;
-		std::allocator_traits<NAllocator>::destroy(alloc, v);
-		std::allocator_traits<NAllocator>::deallocate(alloc, v, 1);
+		std::allocator_traits<NAllocator>::destroy(alloc, static_cast<Node*>(id.ptr));
+		std::allocator_traits<NAllocator>::deallocate(alloc, static_cast<Node*>(id.ptr), 1);
 	}
-
-
-	void push_back(const T& value) { insert_before_with_value(end(), value); }
-	void push_front(const T& value) { insert_before_with_value(begin(), value); }
-	void erase(const_iterator id) {
-		Node* v = id.getNodePtr();
-		erase_between(v->prev, v->next);
-	}
-	void pop_back() { erase(std::prev(end())); }
-	void pop_front() { erase(begin()); }
-	void insert(const_iterator pos, const T& value) { insert_before_with_value(pos, value); }
+	void pop_back() noexcept { erase(std::prev(end())); }
+	void pop_front() noexcept { erase(begin()); }
+	void insert(const_iterator pos, const T& value) noexcept { insert_before_with_value(pos, value); }
 
 };
