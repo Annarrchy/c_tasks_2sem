@@ -11,11 +11,11 @@ public:
 
 
 	char* allocate(int64_t n, const int64_t align) {
+	        void* ptr = static_cast<void *>(finish);
+		size_t space = sizeof(start) - 1;
+	        finish = static_cast<char*>(std::align(align, sizeof(char), ptr, space));
 		char* copy = finish;
 		finish += n;
-		void* ptr = static_cast<void *>(finish);
-		size_t space = sizeof(start) - 1;
-		finish = static_cast<char*>(std::align(align, sizeof(char), ptr, space));
 		return copy;
 	}
 
