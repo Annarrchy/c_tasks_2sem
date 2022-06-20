@@ -5,53 +5,86 @@ template <typename type>
 class Deque {
 public:
 
-	Deque() : arr(new type* [2]), siz(0), capacity(2) {
+	Deque() try : arr(new type* [2]), siz(0), capacity(2) {
+		size_t s = block_capacity * sizeof(type);
 		try {
-			size_t s = block_capacity * sizeof(type);
 			arr[0] = reinterpret_cast<type*>(new uint64_t[s]);
-			arr[1] = reinterpret_cast<type*>(new uint64_t[s]);
-			init = block::init(0, block_capacity - 1);
-			fin = block::fin(0, block_capacity - 1);
 		}
 		catch (...) {
+			delete arr[0];
 			throw;
 		}
+		try {
+			arr[1] = reinterpret_cast<type*>(new uint64_t[s]);
+		}
+		catch (...) {
+			delete[] arr[1];
+			delete[] arr[0];
+			throw;
+		}
+		init = block::init(0, block_capacity - 1);
+		fin = block::fin(0, block_capacity - 1);
 
-	};
+	}
+	catch (...) {
+		delete[] arr;
+		throw;
+	}
 
 	size_t size() const {
 		return siz;
 	};
-	Deque(const Deque& old) :arr(new type* [old.capacity]), siz(old.siz), capacity(old.capacity) {
-		try {
-			uint64_t s = 0, f = 0;
-			fin = new block(*old.fin);
-			uint64_t finish = fin->block_number;
-			init = new block(*old.init);
-			uint64_t start = init->block_number, i = start;
-			while (i <= finish) {
+	Deque(const Deque& old) try :arr(new type* [old.capacity]), siz(old.siz), capacity(old.capacity), init(new block(*old.init)), fin(new block(*old.fin)) {
+
+		uint64_t s = 0, f = 0;
+		uint64_t finish = fin->block_number;
+		uint64_t start = init->block_number, i = start;
+
+		while (i <= finish) {
+			try {
 				arr[i] = reinterpret_cast<type*>(new uint64_t[block_capacity * sizeof(type)]);
-				if (i == start) {
-					s = init->curr;
-					f = block_capacity;
+			}
+			catch (...) {
+				--i;
+				while (i >= 0) {
+					delete[] arr[i];
+					--i;
 				}
-				else {
-					s = 0;
-					if (i == finish) f = fin->curr + 1;
-				}
-				for (uint64_t j = s; j < f; ++j) {
+			}
+			if (i == start) {
+				s = init->curr;
+				f = block_capacity;
+			}
+			else {
+				s = 0;
+				if (i == finish) f = fin->curr + 1;
+			}
+			for (uint64_t j = s; j < f; ++j) {
+				try {
 					new (arr[i] + j) type(old.arr[i][j]);
 				}
-				++i;
+				catch (...) {
+					j--;
+					while (j >= s) {
+						delete[](arr[i] + j);
+						--j;
+					}
+					while (i >= 0) {
+						delete[] arr[i];
+						--i;
+					}
+				}
 			}
+			++i;
 		}
-		catch (...) {
-			delete fin;
-			delete init;
-			delete[] arr;
-			throw;
-		}
-	};
+	}
+	catch (...) {
+		fin->~block();
+		init->~block();
+		delete[] arr;
+		throw;
+	}
+
 
 	template<bool Con>
 	class Iterat {
@@ -221,53 +254,77 @@ public:
 		return (*this)[ind];
 	};
 	void reserve(bool is_start, bool is_finish) {
-		try {
+		
 			size_t start_cap = 0, finish_cap = 0;
 			if (is_start) {
-				start_cap = (siz + block_capacity - 1) / block_capacity;
+				start_cap = capacity;
 			}
 			if (is_finish) {
-				finish_cap = (siz + block_capacity - 1) / block_capacity;
+				finish_cap = capacity;
 			}
 			type** new_arr = new type * [start_cap + capacity + finish_cap];
+			
 			size_t s = block_capacity * sizeof(type);
 			for (size_t i = 0; i < start_cap; ++i) {
-				new_arr[i] = reinterpret_cast<type*>(new uint64_t[s]);
+				try {
+					new_arr[i] = reinterpret_cast<type*>(new uint64_t[s]);
+				}
+				catch (...) {
+					for (size_t p = 0; p < i; ++p) {
+						delete[] new_arr[p];
+					}
+					delete[] new_arr;
+					throw;
+				}
 			}
 			for (size_t i = start_cap + capacity; i < start_cap + capacity + finish_cap; ++i) {
-				new_arr[i] = reinterpret_cast<type*>(new uint64_t[s]);
+				try {
+					new_arr[i] = reinterpret_cast<type*>(new uint64_t[s]);
+				}
+				catch (...) {
+					for (size_t p = 0; p < i; ++p) {
+						delete[] new_arr[p];
+					}
+					delete[] new_arr;
+					throw;
+				}
 			}
 			for (size_t i = 0; i < capacity; ++i) {
 				new_arr[start_cap + i] = arr[i];
 			}
 			init->block_number += start_cap;
 			fin->block_number += start_cap;
-			delete arr;
+			delete[] arr;
 			capacity = start_cap + capacity + finish_cap;
 			arr = new_arr;
-		}
-		catch (...) {
-		        delete[] new_arr;
-			throw;
-		}
+		
 	}
 	void push_back(type value) {
-		if (siz != 0) {
-			if (fin->last != fin->curr) {
-				fin->curr += 1;
+		Deque<type> copy = *this;
+		if (copy.siz != 0) {
+			if (copy.fin->last != copy.fin->curr) {
+				copy.fin->curr += 1;
 			}
 			else {
-				if (fin->block_number == capacity - 1) {
-					reserve(0,true);
+				if (copy.fin->block_number == copy.capacity - 1) {
+					copy.reserve(0, true);
 				}
-				fin->curr = 0;
-				fin->block_number += 1;
+				copy.fin->curr = 0;
+				copy.fin->block_number += 1;
 			}
 		}
-		arr[fin->block_number][fin->curr] = type(value);
+		try {
+			copy.arr[copy.fin->block_number][copy.fin->curr] = value;
+		}
+		catch (...) {
+			copy.~Deque();
+			throw;
+		}
+		*this = copy;
 		siz += 1;
 	}
-	void pop_back() {
+	void pop_back() noexcept{
+
 		if (siz == 0) return;
 		(arr[fin->block_number] + fin->curr)->~type();
 		if (siz != 1) {
@@ -283,36 +340,46 @@ public:
 	}
 
 	void push_front(type value) {
-		if (siz != 0) {
-			if (init->last != init->curr) {
-				init->curr -= 1;
+		Deque<type> copy = *this;
+		if (copy.siz != 0) {
+			if (copy.init->last != copy.init->curr) {
+				copy.init->curr -= 1;
 			}
 			else {
-				if (init->block_number == 0) {
-					reserve(true, 0);
+				if (copy.init->block_number == 0) {
+					copy.reserve(true, 0);
 				}
-				init->block_number -= 1;
-				init->curr = block_capacity - 1;
+				copy.init->block_number -= 1;
+				copy.init->curr = block_capacity - 1;
 			}
 		}
-		arr[init->block_number][init->curr] = type(value);
-		siz += 1;
+		try {
+			copy.arr[copy.init->block_number][copy.init->curr] = value;
+			*this = copy;
+			siz += 1;
+		}
+		catch (...) {
+			copy.~Deque();
+			throw;
+		}
 	}
 	void erase(Iterat<false> it) {
+		Deque<type> copy = *this;
 		try {
-			(*this)[it.ind];
-			for (auto i = it; i < end() - 1; ++i) {
+			for (auto i = it; i < copy.end() - 1; ++i) {
 				type tmp = *(i + 1);
 				*(i + 1) = *i;
 				*i = tmp;
 			}
-			pop_back();
+			copy.pop_back();
+			*this = copy;
 		}
 		catch (...) {
+			copy.~Deque();
 			throw;
 		}
 	}
-	void pop_front() {
+	void pop_front() noexcept {
 		if (siz == 0) return;
 
 		(arr[init->block_number] + init->curr)->~type();
@@ -328,18 +395,34 @@ public:
 		siz -= 1;
 	}
 	void insert(Iterat<false> it, const type& val) {
+		Deque<type> copy = *this;
 		try {
-			(*this)[it.ind];
-			push_back(val);
-			for (auto i = --end(); i > it; --i) {
+			copy.push_back(val);
+			for (auto i = --copy.end(); i > it; --i) {
 				type tmp = *(i - 1);
 				*(i - 1) = *i;
 				*i = tmp;
 			}
+			*this = copy;
 		}
 		catch (...) {
+			copy.~Deque();
 			throw;
 		}
+	}
+	~Deque() {
+		for (uint64_t i = init->block_number; i <= fin->block_number; ++i) {
+			for (uint64_t j = ((i == init->block_number) ? init->curr : 0);
+				j < ((i == fin->block_number) ? fin->curr + 1 : block_capacity); ++j) {
+				(arr[i] + j)->~type();
+			}
+		}
+		for (size_t i = 0; i < capacity; ++i) {
+			delete[] arr[i];
+		}
+		fin->~block();
+		init->~block();
+		delete[] arr;
 	}
 
 	explicit Deque(int n, const type& value = type()) : Deque() {
@@ -373,7 +456,7 @@ private:
 		}
 		block(uint64_t n, uint64_t c, uint64_t f, uint64_t l) : block_number(n), curr(c), first(f), last(l) {}
 		block(const block& old) : block_number(old.block_number), curr(old.curr), first(old.first), last(old.last) {};
-
+		~block() = default;
 
 	};
 
